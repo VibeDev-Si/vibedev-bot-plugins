@@ -13,6 +13,9 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Modified by VibeDev (https://github.com/VibeDev-Si/vibedev-bot-plugins), November 2026: Chinese replies and help,
+# an optional time argument with a Chinese hint, and a link to this source code in the help. See ../README.md.
 from typing import List, Tuple, Type
 from datetime import datetime, timedelta
 from html import escape
@@ -37,7 +40,7 @@ from mautrix.util.config import BaseProxyConfig
 
 from .db import ReminderDatabase
 from .locales import locales
-from .util import Config, DateArgument, ReminderInfo, format_time, parse_timezone
+from .util import Config, DateArgument, ReminderInfo, format_absolute, format_time, parse_timezone
 
 
 class ReminderBot(Plugin):
@@ -125,20 +128,38 @@ class ReminderBot(Plugin):
             content.set_reply(await self.client.get_event(reminder.room_id, reminder.reply_to))
         await self.client.send_message(reminder.room_id, content)
 
+    def _past_reply(self, sender: UserID, date: datetime) -> str:
+        local = date.astimezone(self.db.get_timezone(sender, self.default_timezone))
+        return f"抱歉，{format_absolute(local)} 已经过去了，没法提醒到过去 :("
+
+    def _no_time_reply(self, text: str) -> str:
+        # VibeDev: the time argument is optional so that an unreadable time gets this Chinese hint instead of maubot's
+        # English usage text.
+        c = self.base_command
+        seen = f"没看懂「{text.strip()[:40]}」里的时间。" if text and text.strip() else "缺少时间。"
+        return (
+            f"{seen}时间要写在最前面，用这些写法：`30m`、`2h`、`1d 2h`、`tomorrow 09:00`、`friday 15:00`、"
+            f"`2026-12-01 09:00`（小时写两位）。例如 `!{c} tomorrow 09:00 交周报`。"
+            f"暂不支持中文时间（如「明天 9 点」）和每天、每周的循环提醒。发 `!{c} help` 查看完整用法。"
+        )
+
     @command.new(
         name=lambda self: self.base_command,
         aliases=lambda self, alias: alias in self.base_aliases,
-        help="Create a reminder",
+        help="设一个提醒（发 !remind help 查看用法）",
         require_subcommand=False,
         arg_fallthrough=False,
     )
-    @DateArgument("date", required=True)
+    @DateArgument("date", required=False)
     @command.argument("message", pass_raw=True, required=False)
     async def remind(self, evt: MessageEvent, date: datetime, message: str) -> None:
+        if date is None:
+            await evt.reply(self._no_time_reply(message))
+            return
         date = date.replace(microsecond=0)
         now = datetime.now(tz=pytz.UTC).replace(microsecond=0)
         if date < now:
-            await evt.reply(f"Sorry, {date} is in the past and I don't have a time machine :(")
+            await evt.reply(self._past_reply(evt.sender, date))
             return
         rem = ReminderInfo(
             date=date,
@@ -149,17 +170,20 @@ class ReminderBot(Plugin):
         )
         await self._remind(evt, rem, now)
 
-    @remind.subcommand("for", help="Create a reminder for another user")
+    @remind.subcommand("for", help="给别人设提醒")
     @command.argument("user_id", required=True, matches="@[^:]*:[a-zA-Z0-9.-]{1,255}(?::\d{1,5})?")
-    @DateArgument("date", required=True)
+    @DateArgument("date", required=False)
     @command.argument("message", pass_raw=True, required=False)
     async def remind_for(
         self, evt: MessageEvent, user_id: UserID, date: datetime, message: str
     ) -> None:
+        if date is None:
+            await evt.reply(self._no_time_reply(message))
+            return
         date = date.replace(microsecond=0)
         now = datetime.now(tz=pytz.UTC).replace(microsecond=0)
         if date < now:
-            await evt.reply(f"Sorry, {date} is in the past and I don't have a time machine :(")
+            await evt.reply(self._past_reply(evt.sender, date))
             return
         rem = ReminderInfo(
             date=date,
@@ -170,17 +194,20 @@ class ReminderBot(Plugin):
         )
         await self._remind(evt, rem, now, recipient=user_id.split(":")[0].removeprefix("@"))
 
-    @remind.subcommand("reschedule", help="Reschedule a reminder you got", aliases=("again",))
-    @DateArgument("date", required=True)
+    @remind.subcommand("reschedule", help="把收到的提醒改到另一个时间", aliases=("again",))
+    @DateArgument("date", required=False)
     async def reschedule(self, evt: MessageEvent, date: datetime) -> None:
         reply_to_id = evt.content.get_reply_to()
         if not reply_to_id:
-            await evt.reply("You must reply to a reminder event to reschedule it.")
+            await evt.reply("要改期，请先回复那条提醒消息，再发这个命令。")
+            return
+        if date is None:
+            await evt.reply(self._no_time_reply(""))
             return
         date = date.replace(microsecond=0)
         now = datetime.now(tz=pytz.UTC).replace(microsecond=0)
         if date < now:
-            await evt.reply(f"Sorry, {date} is in the past and I don't have a time machine :(")
+            await evt.reply(self._past_reply(evt.sender, date))
             return
         reply_to = await self.client.get_event(evt.room_id, reply_to_id)
         try:
@@ -193,7 +220,7 @@ class ReminderBot(Plugin):
                 users={evt.sender: evt.event_id},
             )
         except KeyError:
-            await evt.reply("That doesn't look like a valid reminder event.")
+            await evt.reply("这看起来不是一条有效的提醒消息。")
             return
         await self._remind(evt, rem, now, again=True)
 
@@ -203,30 +230,29 @@ class ReminderBot(Plugin):
         rem: ReminderInfo,
         now: datetime,
         again: bool = False,
-        recipient: str = "you",
+        recipient: str = "你",
     ) -> None:
         if rem.date == now:
             await self.send_reminder(rem)
             return
         if rem.date.year > now.year + 125:
-            recipient = "your descendants" if recipient == "you" else f"{recipient}'s descendants"
-        remind_type = f"remind {recipient} "
-        if rem.reply_to:
-            evt_link = f"[event](https://matrix.to/#/{rem.room_id}/{rem.reply_to})"
-            if rem.message:
-                remind_type += f"to {rem.message} (replying to that {evt_link})"
-            else:
-                remind_type += f"about that {evt_link}"
-        elif rem.message:
-            remind_type += f"to {rem.message}"
-        else:
-            remind_type = "ping you"
-            rem.message = "ping"
+            recipient = "你的后代" if recipient == "你" else f"{recipient} 的后代"
+        what = f"提醒{recipient}" if recipient == "你" or recipient.endswith("后代") else f"提醒 {recipient} "
         if again:
-            remind_type += " again"
+            what = "再次" + what
+        if rem.reply_to:
+            evt_link = f"[那条消息](https://matrix.to/#/{rem.room_id}/{rem.reply_to})"
+            if rem.message:
+                what += f"「{rem.message}」（关于{evt_link}）"
+            else:
+                what += f"看{evt_link}"
+        elif rem.message:
+            what += f"「{rem.message}」"
+        else:
+            rem.message = "提醒"
         msg = (
-            f"I'll {remind_type} {self.format_time(evt.sender, rem)}.\n\n"
-            f"(others can \U0001f44d this message to get pinged too)"
+            f"好的，{self.format_time(evt.sender, rem)}{what}。\n\n"
+            f"（其他人给这条消息点 \U0001f44d 也会一起被提醒）"
         )
         rem.event_id = await evt.reply(msg)
         self.db.insert(rem)
@@ -235,24 +261,28 @@ class ReminderBot(Plugin):
             self.log.debug(f"Reminder {rem} is in less than a minute, scheduling now...")
             background_task.create(self.send_reminder(rem))
 
-    @remind.subcommand("help", help="Usage instructions")
+    @remind.subcommand("help", help="用法说明")
     async def help(self, evt: MessageEvent) -> None:
+        c = self.base_command
+        server = self.client.mxid.partition(":")[2]
         await evt.reply(
-            f"Maubot [Reminder](https://github.com/maubot/reminder) plugin.\n\n"
-            f"* !{self.base_command} <date> <message> - Add a reminder\n"
-            f"* !{self.base_command} again <date> - Reply to a reminder to reschedule it\n"
-            f"* !{self.base_command} list - Get a list of your reminders\n"
-            f"* !{self.base_command} tz <timezone> - Set your time zone\n"
-            f"* !{self.base_command} locale <locale> - Set your locale\n"
-            f"* !{self.base_command} locales - List available locales\n\n"
-            "<date> can be a time delta (e.g. `2 days 1.5 hours` or `friday at 15:00`) "
-            "or an absolute date (e.g. `2020-03-27 15:00`)\n\n"
-            "To get mentioned by a reminder added by someone else, upvote the message "
-            "by reacting with \U0001f44d.\n\n"
-            "To cancel a reminder, remove the message or reaction."
+            "**VibeDev 提醒**用法（命令和时间写法用英文格式）：\n\n"
+            f"* `!{c} <时间> <内容>`：设提醒，例如 `!{c} 30m 喝水`、`!{c} 2h 开会`、"
+            f"`!{c} tomorrow 09:00 交周报`、`!{c} friday 15:00 例会`、`!{c} 2026-12-01 09:00 发版`\n"
+            f"* `!{c} for @某人:{server} <时间> <内容>`：给别人设提醒\n"
+            f"* 回复一条消息再发 `!{c} <时间>`：到时提醒你看那条消息\n"
+            f"* 回复收到的提醒发 `!{c} again <时间>`：改期再提醒一次\n"
+            f"* `!{c} list`：本群你的提醒；`!{c} list all`：所有群\n"
+            f"* `!{c} tz Asia/Shanghai`：设置你的时区（默认就是北京时间）\n\n"
+            "**时间写法**：`30m` / `2h` / `1d` / `1d 2h 30m`（多久之后），"
+            "`today 18:00`、`tomorrow 09:00`、`monday 10:00`（某天某时，时间必须写成两位 `09:00`），"
+            "`2026-12-01 09:00`（具体日期）。暂不认中文时间（例如「明天 9 点」），也不支持每天、每周的循环提醒。\n\n"
+            "**取消**：删除你发的那条命令，或删除机器人的确认消息。"
+            "想一起被提醒：给确认消息点 \U0001f44d；取消点赞即退出。\n\n"
+            "源码：https://github.com/VibeDev-Si/vibedev-bot-plugins"
         )
 
-    @remind.subcommand("list", help="List your reminders")
+    @remind.subcommand("list", help="列出你的提醒")
     @command.argument("all", required=False)
     async def list(self, evt: MessageEvent, all: str) -> None:
         room_id = evt.room_id
@@ -261,37 +291,35 @@ class ReminderBot(Plugin):
 
         def format_rem(rem: ReminderInfo) -> str:
             if rem.reply_to:
-                evt_link = f"[event](https://matrix.to/#/{rem.room_id}/{rem.reply_to})"
+                evt_link = f"[那条消息](https://matrix.to/#/{rem.room_id}/{rem.reply_to})"
                 if rem.message:
-                    return f'"{rem.message}" (replying to {evt_link})'
+                    return f"「{rem.message}」（关于{evt_link}）"
                 else:
                     return evt_link
             else:
-                return f'"{rem.message}"'
+                return f"「{rem.message}」"
 
         reminders_str = "\n".join(
-            f"* {format_rem(reminder)} {self.format_time(evt.sender, reminder)}"
+            f"* {format_rem(reminder)}：{self.format_time(evt.sender, reminder)}"
             for reminder in self.db.all_for_user(evt.sender, room_id=room_id)
         )
-        message = "upcoming reminders"
-        if room_id:
-            message += " in this room"
+        scope = "本群" if room_id else "所有群"
         if len(reminders_str) == 0:
-            await evt.reply(f"You have no {message} :(")
+            await evt.reply(f"你在{scope}没有待发的提醒。")
         else:
-            await evt.reply(f"Your {message}:\n\n{reminders_str}")
+            await evt.reply(f"你在{scope}待发的提醒：\n\n{reminders_str}")
 
     def format_time(self, sender: UserID, reminder: ReminderInfo) -> str:
         return format_time(reminder.date.astimezone(self.db.get_timezone(sender)))
 
-    @remind.subcommand("locales", help="List available locales")
+    @remind.subcommand("locales", help="列出可用的时间写法")
     async def locales(self, evt: MessageEvent) -> None:
         def _format_key(key: str) -> str:
             language, country = key.split("_")
             return f"{language.lower()}_{country.upper()}"
 
         await evt.reply(
-            "Available locales:\n\n"
+            "可用的时间写法（用 `!remind locale <代号>` 选择，默认 en_ISO）：\n\n"
             + "\n".join(
                 f"* `{_format_key(key)}` - {locale.name}" for key, locale in locales.items()
             )
@@ -301,34 +329,32 @@ class ReminderBot(Plugin):
     def _fmt_locales(locale_ids: List[str]) -> str:
         locale_names = [locales[id].name for id in locale_ids]
         if len(locale_names) == 0:
-            return "unset"
-        elif len(locale_names) == 1:
-            return locale_names[0]
-        else:
-            return ", ".join(locale_names[:-1]) + " and " + locale_names[-1]
+            return "未设置"
+        return "、".join(locale_names)
 
-    @remind.subcommand("locale", help="Set your locale")
+    @remind.subcommand("locale", help="设置你的时间写法")
     @command.argument("locale", required=False, pass_raw=True)
     async def locale(self, evt: MessageEvent, locale: str) -> None:
         if not locale:
-            await evt.reply(f"Your locale is {self._fmt_locales(self.db.get_locales(evt.sender))}")
+            await evt.reply(f"你的时间写法是：{self._fmt_locales(self.db.get_locales(evt.sender))}")
             return
         locale_ids = [part.strip() for part in locale.lower().split(" ")]
         for locale_id in locale_ids:
             if locale_id not in locales:
-                await evt.reply(f"Locale `{locale_id}` is not supported")
+                await evt.reply(f"不支持时间写法 `{locale_id}`，发 `!remind locales` 查看可用的。")
                 return
         self.db.set_locales(evt.sender, locale_ids)
-        await evt.reply(f"Set your locale to {self._fmt_locales(locale_ids)}")
+        await evt.reply(f"已把你的时间写法设为：{self._fmt_locales(locale_ids)}")
 
-    @remind.subcommand("timezone", help="Set your timezone", aliases=("tz",))
+    @remind.subcommand("timezone", help="设置你的时区", aliases=("tz",))
     @command.argument("timezone", parser=parse_timezone, required=False)
     async def timezone(self, evt: MessageEvent, timezone: pytz.timezone) -> None:
         if not timezone:
-            await evt.reply(f"Your time zone is {self.db.get_timezone(evt.sender).zone}")
+            zone = self.db.get_timezone(evt.sender, self.default_timezone).zone
+            await evt.reply(f"你的时区是 {zone}")
             return
         self.db.set_timezone(evt.sender, timezone)
-        await evt.reply(f"Set your timezone to {timezone.zone}")
+        await evt.reply(f"已把你的时区设为 {timezone.zone}")
 
     @command.passive(
         regex=r"(?:\U0001F44D[\U0001F3FB-\U0001F3FF]?)",

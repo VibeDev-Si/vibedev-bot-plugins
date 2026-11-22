@@ -1,6 +1,8 @@
 maubot: 0.1.0
 id: xyz.maubot.dice
-version: 1.1.0
+version: 1.1.0+vibedev.2
+# VibeDev build of maubot/dice@94ca4b0e17bc2d968e31a55967dae5cecd0bdab1: Python 3.14 fix and a Chinese `!roll help`.
+# Source and list of changes: https://github.com/VibeDev-Si/vibedev-bot-plugins/tree/main/dice
 license: AGPL-3.0-or-later
 modules:
 - dice

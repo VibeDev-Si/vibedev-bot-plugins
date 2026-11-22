@@ -1,6 +1,6 @@
 # Default timezone for users who did not set one.
-# This is parsed with pytz, so the usual format is Continent/City, e.g. Europe/Helsinki.
-default_timezone: 'UTC'
+# This is parsed with pytz, so the usual format is Continent/City, e.g. Asia/Shanghai.
+default_timezone: 'Asia/Shanghai'
 
 # Base command without the prefix (!).
 # If a list is provided, the first is the main name and the rest are aliases.

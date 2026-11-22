@@ -13,6 +13,9 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Modified by VibeDev (https://github.com/VibeDev-Si/vibedev-bot-plugins), November 2026: works on Python 3.14
+# (ast.Str and ast.Constant.n were removed), and a Chinese `!roll help` with a link to this source code. See README.md.
 from typing import Match, Union, Any, Type
 import operator
 import random
@@ -25,6 +28,16 @@ from maubot import Plugin, MessageEvent
 from maubot.handlers import command
 
 pattern_regex = re.compile("([0-9]{0,9})[dD]([0-9]{1,9})")
+
+# VibeDev: `!roll help` in Chinese, with the link to the source code of this modified version.
+HELP = (
+    "**掷骰子**用法：\n\n"
+    "* `!roll`：掷一个六面骰\n"
+    "* `!roll 2d6`：掷两个六面骰并相加（`d` 前面是个数，后面是面数）\n"
+    "* `!roll 1d20+5`、`!roll (1+2)*3`：骰子可以和算式一起用\n\n"
+    "源码：https://github.com/VibeDev-Si/vibedev-bot-plugins"
+)
+BAD_PATTERN = "Bad pattern 3:<（看不懂这个写法，发 `!roll help` 查看用法）"
 
 _OP_MAP = {
     ast.Add: operator.add,
@@ -118,7 +131,7 @@ class Calc(ast.NodeVisitor):
         if isinstance(node.value, (int, float)):
             if node.value > _NUM_MAX or node.value < _NUM_MIN:
                 raise ValueError(f"Number out of bounds")
-            return node.n
+            return node.value  # VibeDev: Python 3.14 removed ast.Constant.n
         return None
 
     def visit_Name(self, node: ast.Name) -> Any:
@@ -131,8 +144,10 @@ class Calc(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> Any:
         if isinstance(node.func, ast.Name):
-            if node.func.id == "ord" and len(node.args) == 1 and isinstance(node.args[0], ast.Str):
-                return ord(node.args[0].s)
+            # VibeDev: Python 3.14 removed ast.Str and .s
+            if (node.func.id == "ord" and len(node.args) == 1 and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                return ord(node.args[0].value)
             try:
                 func = _FUNC_MAP[node.func.id]
             except KeyError:
@@ -203,8 +218,11 @@ class DiceBot(Plugin):
         if not pattern:
             await evt.reply(str(random.randint(1, 6)))
             return
+        elif pattern.strip().lower() in ("help", "帮助"):
+            await evt.reply(HELP)
+            return
         elif len(pattern) > 64:
-            await evt.reply("Bad pattern 3:<")
+            await evt.reply(BAD_PATTERN)
             return
         self.log.debug(f"Handling `{pattern}` from {evt.sender}")
 
@@ -250,7 +268,7 @@ class DiceBot(Plugin):
         except (TypeError, NameError, ValueError, SyntaxError, KeyError, OverflowError,
                 ZeroDivisionError):
             self.log.debug(f"Failed to evaluate `{pattern}`", exc_info=True)
-            await evt.reply("Bad pattern 3:<")
+            await evt.reply(BAD_PATTERN)
             return
         if self.show_statement and pattern != result:
             result = f"{pattern} = {result}"

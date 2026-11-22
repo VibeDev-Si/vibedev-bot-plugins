@@ -1,6 +1,9 @@
 maubot: 0.4.1
-id: xyz.maubot.reminder
-version: 0.2.2
+# VibeDev package of maubot/reminder (upstream commit 06fc782c1a5d3c24580cc5322f37b09e4bc03d36, AGPL-3.0-or-later):
+# Chinese replies, default time zone Asia/Shanghai. Command keywords are unchanged.
+# Source and list of changes: https://github.com/VibeDev-Si/vibedev-bot-plugins/tree/main/reminder
+id: studio.vibedev.reminder
+version: 0.2.2+vibedev.3
 license: AGPL-3.0-or-later
 modules:
 - reminder
