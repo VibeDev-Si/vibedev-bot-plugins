@@ -1,0 +1,66 @@
+--- a/dist/protections/BasicFlooding.js
++++ b/dist/protections/BasicFlooding.js
+@@ -1,4 +1,6 @@
+ "use strict";
++// Modified by VibeDev (https://github.com/VibeDev-Si/vibedev-bot-plugins/tree/main/draupnir), 2026-11-23:
++// senders listed in VIBEDEV_DRAUPNIR_EXEMPT_SENDERS are exempt from this protection (see README there).
+ // Copyright 2022 Gnuxie <Gnuxie@protonmail.com>
+ // Copyright 2019, 2020 The Matrix.org Foundation C.I.C.
+ //
+@@ -67,6 +69,12 @@
+     const userEvents = lastEventsUserEntry(roomEntry, userID);
+     return userEvents;
+ }
++// VibeDev: Matrix user IDs (comma-separated) this protection neither counts nor acts on, such as the VibeDev AI
++// assistant, whose answers to several people in a row are not flooding. Empty or unset: the original behaviour.
++const VIBEDEV_EXEMPT_SENDERS = new Set((process.env.VIBEDEV_DRAUPNIR_EXEMPT_SENDERS ?? "")
++    .split(",")
++    .map((sender) => sender.trim())
++    .filter((sender) => sender.length > 0));
+ class BasicFloodingProtection extends matrix_protection_suite_1.AbstractProtection {
+     draupnir;
+     maxPerMinute;
+@@ -85,6 +93,10 @@
+         // If the sender is draupnir, ignore the message
+         if (event["sender"] === this.draupnir.clientUserID) {
+             log.debug(`Ignoring message from self: ${event.event_id}`);
++            return (0, matrix_protection_suite_1.Ok)(undefined);
++        }
++        // VibeDev: exempt senders are neither counted nor acted on.
++        if (VIBEDEV_EXEMPT_SENDERS.has(event["sender"])) {
+             return (0, matrix_protection_suite_1.Ok)(undefined);
+         }
+         // If the event is a redaction, ignore it.
+--- a/dist/protections/MentionLimitProtection.js
++++ b/dist/protections/MentionLimitProtection.js
+@@ -1,4 +1,6 @@
+ "use strict";
++// Modified by VibeDev (https://github.com/VibeDev-Si/vibedev-bot-plugins/tree/main/draupnir), 2026-11-23:
++// senders listed in VIBEDEV_DRAUPNIR_EXEMPT_SENDERS are exempt from this protection (see README there).
+ // Copyright 2024 - 2025 Gnuxie <Gnuxie@protonmail.com>
+ // Copyright 2024 The Matrix.org Foundation C.I.C.
+ //
+@@ -57,6 +59,12 @@
+ }, {
+     title: "MentionLimitProtectionSettings",
+ });
++// VibeDev: Matrix user IDs (comma-separated) this protection neither counts nor acts on, such as the VibeDev AI
++// assistant, whose answers to several people in a row are not flooding. Empty or unset: the original behaviour.
++const VIBEDEV_EXEMPT_SENDERS = new Set((process.env.VIBEDEV_DRAUPNIR_EXEMPT_SENDERS ?? "")
++    .split(",")
++    .map((sender) => sender.trim())
++    .filter((sender) => sender.length > 0));
+ class MentionLimitProtection extends matrix_protection_suite_1.AbstractProtection {
+     roomMessageSender;
+     eventConsequences;
+@@ -77,6 +85,10 @@
+     }
+     handleTimelineEventMixins(_room, event) {
+         if (event.sourceEvent.sender === this.protectedRoomsSet.userID) {
++            return;
++        }
++        // VibeDev: exempt senders are not acted on.
++        if (VIBEDEV_EXEMPT_SENDERS.has(event.sourceEvent.sender)) {
+             return;
+         }
+         if (isContainingMentionsOverLimit(event, this.maxMentions, this.includeLegacymentions)) {

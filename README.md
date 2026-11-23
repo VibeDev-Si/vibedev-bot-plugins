@@ -24,6 +24,10 @@ VibeDev 聊天里的机器人运行在 [maubot](https://github.com/maubot/maubot
 
 maubot 本身（0.6.1）用的是官方镜像，原样使用：[maubot/maubot v0.6.1](https://github.com/maubot/maubot/tree/v0.6.1)。
 
+### 安全助手（Draupnir）的补丁
+
+「VibeDev 安全助手」是 Draupnir 3.2.0 的官方镜像，只改了两个文件：防刷屏和防群发 @ 不处理指定的发送者（VibeDev AI 助手）。补丁、改后的文件和说明在 [draupnir/](draupnir/)，许可证 Apache-2.0（和这两个文件的上游许可证一致）。
+
 ## 构建
 
 需要 Python 3.8 以上，只用标准库：
